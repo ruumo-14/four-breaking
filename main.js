@@ -1,4 +1,3 @@
-// ネット上から必要なプログラムを直接読み込む（ターミナル不要になる魔法）
 import * as THREE from 'https://esm.sh/three';
 import { OrbitControls } from 'https://esm.sh/three/addons/controls/OrbitControls.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js';
@@ -8,36 +7,100 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js';
 const supabaseUrl = 'https://pxcimtveipluoenjiebx.supabase.co/rest/v1/';
 const supabaseKey = 'sb_publishable_73t9gf0Rm47Kae9KAHfe6w_asA7g7mM';
 const supabase = createClient(supabaseUrl, supabaseKey);
-let roomChannel = null;
 
 // --- 2. ゲームの状態管理 ---
 let myColor = null;
 let currentTurn = 'red';
 let isGameActive = false;
+let roomChannel = null;
 const board = Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => []));
 
-// --- 3. UIの制御 ---
 const uiContainer = document.getElementById('ui-container');
 const statusText = document.getElementById('status');
+const roomListContainer = document.getElementById('room-list-container');
 
-document.getElementById('btn-red').onclick = () => startGame('red');
-document.getElementById('btn-yellow').onclick = () => startGame('yellow');
+// --- 3. ロビー（部屋一覧）の管理 ---
+const lobbyChannel = supabase.channel('lobby');
 
-function startGame(color) {
-  const roomId = document.getElementById('room-input').value;
+// 誰かが部屋を作ったり消したりした時にリストを更新する
+lobbyChannel.on('presence', { event: 'sync' }, () => {
+  const state = lobbyChannel.presenceState();
+  updateRoomList(state);
+}).subscribe();
+
+// 「部屋を作って待つ」ボタンの処理
+document.getElementById('btn-create').onclick = async () => {
+  const roomName = document.getElementById('new-room-input').value;
+  if (!roomName) return alert('部屋の名前を入力してください！');
+  
+  // ロビーに「この部屋で待ってるよ」と登録する
+  await lobbyChannel.track({ roomName: roomName, status: 'waiting' });
+  startGame(roomName, 'red'); // 作った人は赤色
+};
+
+// 部屋一覧のボタンを画面に作る処理
+function updateRoomList(state) {
+  const availableRooms = new Set();
+  
+  // 待機中の部屋を探す
+  for (const key in state) {
+    state[key].forEach(user => {
+      if (user.status === 'waiting') availableRooms.add(user.roomName);
+    });
+  }
+
+  roomListContainer.innerHTML = '';
+  if (availableRooms.size === 0) {
+    roomListContainer.innerHTML = '<p style="font-size: 0.9rem; color: #aaa;">待機中の部屋はありません</p>';
+    return;
+  }
+
+  // 見つかった部屋の数だけ参加ボタンを作る
+  availableRooms.forEach(roomName => {
+    const btn = document.createElement('button');
+    btn.className = 'room-btn';
+    btn.innerText = `${roomName} に参加 (後手/黄)`;
+    btn.onclick = () => {
+      startGame(roomName, 'yellow'); // 参加する人は黄色
+    };
+    roomListContainer.appendChild(btn);
+  });
+}
+
+// --- 4. ゲームスタートの処理 ---
+function startGame(roomId, color) {
   myColor = color;
   uiContainer.style.display = 'none';
-  updateStatusText();
   isGameActive = true;
+  
+  if (myColor === 'red') {
+    statusText.innerText = "相手の参加を待っています...";
+    statusText.style.color = 'white';
+  } else {
+    updateStatusText();
+  }
 
-  // Supabaseのルームに参加（友達とつながる）
   roomChannel = supabase.channel(`game-${roomId}`);
+  
   roomChannel
     .on('broadcast', { event: 'place_piece' }, (payload) => {
-      const { x, z, color } = payload.payload;
-      addPieceToBoard(x, z, color, false);
+      // 相手がコマを置いた時
+      const { x, z, c } = payload.payload;
+      addPieceToBoard(x, z, c, false);
     })
-    .subscribe();
+    .on('broadcast', { event: 'player_joined' }, () => {
+      // (赤側のみ) 相手が参加してきたらロビーの部屋一覧から自分を消す
+      if (myColor === 'red') {
+        lobbyChannel.untrack();
+        updateStatusText();
+      }
+    })
+    .subscribe((status) => {
+      // (黄側のみ) 部屋に入れたら「入ったよ！」と赤に知らせる
+      if (status === 'SUBSCRIBED' && myColor === 'yellow') {
+        roomChannel.send({ type: 'broadcast', event: 'player_joined', payload: {} });
+      }
+    });
 }
 
 function updateStatusText() {
@@ -50,7 +113,7 @@ function updateStatusText() {
   }
 }
 
-// --- 4. Three.js 3D描画セットアップ ---
+// --- 5. Three.js 3D描画セットアップ ---
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x222222);
 
@@ -100,7 +163,7 @@ for (let x = 0; x < 4; x++) {
   }
 }
 
-// --- 5. クリック操作 ---
+// --- 6. クリック操作 ---
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
@@ -120,7 +183,7 @@ window.addEventListener('click', (event) => {
   }
 });
 
-// --- 6. コマを置く処理と勝利判定 ---
+// --- 7. コマを置く処理と勝利判定 ---
 function addPieceToBoard(x, z, color, isLocal) {
   const y = board[x][z].length;
   board[x][z].push(color);
@@ -136,12 +199,11 @@ function addPieceToBoard(x, z, color, isLocal) {
   piece.position.set(x - gridOffset, y + 0.4, z - gridOffset);
   scene.add(piece);
 
-  // 自分が置いた場合は相手に送信
   if (isLocal && roomChannel) {
     roomChannel.send({
       type: 'broadcast',
       event: 'place_piece',
-      payload: { x, z, color }
+      payload: { x, z, c: color } // colorをcとして送信
     });
   }
 
@@ -177,7 +239,7 @@ function checkWin(cx, cy, cz, color) {
   return false;
 }
 
-// --- 7. アニメーションループ ---
+// --- 8. アニメーションループ ---
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
