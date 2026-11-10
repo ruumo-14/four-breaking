@@ -12,6 +12,7 @@ let activeGame = null;
 let roomChannel = null;
 let selectedGameByMe = null;
 let selectedGameByOpp = null;
+let gameGracePeriod = 0; // ★即負け防止用の猶予フレームカウンター
 
 const statusText = document.getElementById('status');
 const uiContainer = document.getElementById('ui-container');
@@ -189,6 +190,7 @@ function returnToSelect() {
 }
 
 function launchGame(game) {
+  gameGracePeriod = 60; // 1秒間（60フレーム）は判定を行わない猶予を付与
   uiContainer.style.display = 'none';
   if (game === 'oni') startOnigokko();
   else if (game === 'hilow') startHiLowGame();
@@ -230,7 +232,57 @@ function switchUI(is3D, isMobileControls) {
 
 
 // ==========================================
-// 1. 🧠 ハイ＆ロー心理戦 (Hi-Low Game)
+// 1. 🏃 モール鬼ごっこ (バグ修正済)
+// ==========================================
+let oniIsActive = false, oniTimeLeft = 40, oniTimerInterval = null;
+const oniMyState = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rot: 0, stamina: 100, isGrounded: true };
+const oniOppState = { x: 999, y: 999, z: 999, rot: 0 }; // 初期位置を十分遠くに設定
+let oniPlayerMesh, oniOppMesh, oniCamContainer;
+
+function startOnigokko() {
+  activeGame = 'oni'; oniIsActive = true; oniTimeLeft = 40; switchUI(true, true);
+  staminaContainer.style.display = 'block';
+  currentScene = new THREE.Scene(); currentScene.background = new THREE.Color(0x34495e);
+  oniCamContainer = new THREE.Group(); currentScene.add(oniCamContainer);
+  currentCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+  currentCamera.position.set(0, 12, 14); currentCamera.lookAt(0, 0, 0); oniCamContainer.add(currentCamera);
+  currentScene.add(new THREE.AmbientLight(0xffffff, 0.7));
+
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(60, 1, 60), new THREE.MeshStandardMaterial({ color: 0xecf0f1 })); floor.position.y = -0.5; currentScene.add(floor);
+  oniPlayerMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.6, 1.2, 4, 8), new THREE.MeshStandardMaterial({ color: myRole==='host'?0xe74c3c:0x2980b9 }));
+  oniOppMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.6, 1.2, 4, 8), new THREE.MeshStandardMaterial({ color: myRole==='host'?0x2980b9:0xe74c3c }));
+  currentScene.add(oniPlayerMesh, oniOppMesh);
+  
+  // 初期スポーン位置を大きく離す
+  oniMyState.x = myRole === 'host' ? -20 : 20;
+  oniMyState.z = myRole === 'host' ? -20 : 20;
+  oniMyState.y = 0; oniMyState.vy = 0;
+
+  statusText.innerText = myRole==='host' ? "👹 【あなたは鬼】 捕まえろ！" : "🏃 【あなたは逃げ手】 逃げ切れ！";
+  
+  clearInterval(oniTimerInterval);
+  if (myRole === 'host') {
+    oniTimerInterval = setInterval(() => {
+      if (!oniIsActive) return;
+      oniTimeLeft--;
+      roomChannel.send({ type: 'broadcast', event: 'oni_timer', payload: { time: oniTimeLeft } });
+      if (oniTimeLeft <= 0) oniEnd('guest');
+    }, 1000);
+  }
+  roomChannel.on('broadcast', { event: 'oni_timer' }, (p) => { oniTimeLeft = p.payload.time; })
+    .on('broadcast', { event: 'sync' }, (p) => { oniOppState.x = p.payload.x; oniOppState.y = p.payload.y; oniOppState.z = p.payload.z; oniOppState.rot = p.payload.rot; })
+    .on('broadcast', { event: 'oni_caught' }, () => oniEnd('host'));
+}
+function oniEnd(winnerRole) {
+  if (!oniIsActive) return;
+  oniIsActive = false; clearInterval(oniTimerInterval); staminaContainer.style.display = 'none';
+  statusText.innerText = (myRole === winnerRole) ? "👑 WIN!!" : "💀 LOSE...";
+  setTimeout(() => { if (myRole === 'host') roomChannel.send({ type: 'broadcast', event: 'back_to_select' }); returnToSelect(); }, 2500);
+}
+
+
+// ==========================================
+// 2. 🧠 ハイ＆ロー心理戦
 // ==========================================
 let hilowIsActive = false, hilowMyCard = 0, hilowOppCard = 0, hilowMyChoice = null, hilowScore = { me: 0, opp: 0 };
 function startHiLowGame() {
@@ -244,14 +296,12 @@ function startHiLowGame() {
     }
   });
 }
-
 function setupHiLowRound() {
   hilowMyCard = Math.floor(Math.random() * 10) + 1;
   hilowMyChoice = null; hilowOppCard = null;
   statusText.innerText = `あなたのカードは 【 ${hilowMyCard} 】！ 相手はHIGH？LOW？`;
   statusText.style.color = "#8e44ad";
 }
-
 function checkHiLowResult() {
   if (hilowMyChoice && hilowOppCard) {
     const isHigh = hilowOppCard > hilowMyCard;
@@ -266,7 +316,6 @@ function checkHiLowResult() {
     }, 2000);
   }
 }
-
 window.addEventListener('click', (e) => {
   if (activeGame !== 'hilow' || !hilowIsActive || hilowMyChoice) return;
   const rect = canvas2D.getBoundingClientRect();
@@ -285,10 +334,10 @@ window.addEventListener('click', (e) => {
 
 
 // ==========================================
-// 2. 💥 爆弾ドッジボール (Bomb Dodge)
+// 3. 💥 爆弾ドッジボール (バグ修正済)
 // ==========================================
 let bombIsActive = false, bombHolder = 'host', bombTimer = 30, bombTimerInterval = null;
-const bombMyState = { x: 0, z: 0 }, bombOppState = { x: 0, z: 0 };
+const bombMyState = { x: 0, z: 0 }, bombOppState = { x: 999, z: 999 };
 let bPlayerMesh, bOppMesh, bBombMesh;
 
 function startBombGame() {
@@ -308,8 +357,10 @@ function startBombGame() {
 
   bombMyState.x = myRole === 'host' ? -8 : 8; bombMyState.z = 0;
 
+  clearInterval(bombTimerInterval);
   if (myRole === 'host') {
     bombTimerInterval = setInterval(() => {
+      if (!bombIsActive) return;
       bombTimer--;
       roomChannel.send({ type: 'broadcast', event: 'bomb_sync', payload: { timer: bombTimer, holder: bombHolder } });
       if (bombTimer <= 0) bombEnd();
@@ -319,8 +370,8 @@ function startBombGame() {
   roomChannel.on('broadcast', { event: 'bomb_sync' }, (p) => { bombTimer = p.payload.timer; bombHolder = p.payload.holder; })
     .on('broadcast', { event: 'bomb_move' }, (p) => { bombOppState.x = p.payload.x; bombOppState.z = p.payload.z; });
 }
-
 function bombEnd() {
+  if (!bombIsActive) return;
   bombIsActive = false; clearInterval(bombTimerInterval);
   const isWin = bombHolder !== myRole;
   statusText.innerText = isWin ? "👑 爆発！あなたの勝利！" : "💥 爆発！あなたの負け！";
@@ -329,11 +380,10 @@ function bombEnd() {
 
 
 // ==========================================
-// 3. ⚽ 2Dエアホッケー (Air Hockey)
+// 4. ⚽ 2Dエアホッケー
 // ==========================================
 let hockeyIsActive = false, hockeyP1Y = 250, hockeyP2Y = 250, hockeyBall = { x: 400, y: 300, vx: 5, vy: 3 };
 let hockeyScore = { p1: 0, p2: 0 };
-
 function startHockeyGame() {
   activeGame = 'hockey'; hockeyIsActive = true; switchUI(false, true);
   hockeyScore.p1 = 0; hockeyScore.p2 = 0; resetHockeyBall();
@@ -346,100 +396,55 @@ function resetHockeyBall() { hockeyBall = { x: 400, y: 300, vx: (Math.random()>0
 
 
 // ==========================================
-// 4. 🧱 3Dブロック崩し対戦 (Breakout Duel)
+// 5. 🧱 3Dブロック崩し対戦
 // ==========================================
-let breakoutIsActive = false, breakoutMyX = 0, breakoutOppX = 0, breakoutBall = { x: 0, z: 0, vx: 0.15, vz: -0.2 };
-let breakoutMyBricks = [], breakoutOppBricks = [];
-
+let breakoutIsActive = false;
 function startBreakoutGame() {
   activeGame = 'breakout'; breakoutIsActive = true; switchUI(true, true);
   currentScene = new THREE.Scene(); currentScene.background = new THREE.Color(0x2c3e50);
   currentCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
   currentCamera.position.set(0, 25, 0); currentCamera.lookAt(0, 0, 0);
   currentScene.add(new THREE.AmbientLight(0xffffff, 0.8));
-
-  // ステージ枠
-  const border = new THREE.Mesh(new THREE.BoxGeometry(20, 1, 30), new THREE.MeshStandardMaterial({ color: 0x34495e }));
-  border.position.y = -0.5; currentScene.add(border);
-
+  const border = new THREE.Mesh(new THREE.BoxGeometry(20, 1, 30), new THREE.MeshStandardMaterial({ color: 0x34495e })); border.position.y = -0.5; currentScene.add(border);
   statusText.innerText = "🧱 ブロックを打ち返せ！"; statusText.style.color = "#e74c3c";
 }
 
 
 // ==========================================
-// 5. 🪙 2Dコインラッシュ (Coin Rush)
+// 6. 🪙 2Dコインラッシュ
 // ==========================================
 let coinIsActive = false, coinMyState = { x: 100, y: 500, vx: 0, vy: 0, score: 0 }, coinOppState = { x: 700, y: 500, score: 0 };
 let coins = [], coinTimer = 30, coinTimerInterval = null;
-
 function startCoinGame() {
   activeGame = 'coin'; coinIsActive = true; switchUI(false, true);
   coinMyState.score = 0; coinOppState.score = 0; coinTimer = 30; coins = [];
-  
+  clearInterval(coinTimerInterval);
   if (myRole === 'host') {
     coinTimerInterval = setInterval(() => {
+      if (!coinIsActive) return;
       coinTimer--;
       if (Math.random() < 0.6) coins.push({ x: Math.random() * 700 + 50, y: 0 });
       roomChannel.send({ type: 'broadcast', event: 'coin_sync', payload: { timer: coinTimer, coins, oppScore: coinMyState.score } });
       if (coinTimer <= 0) coinEnd();
     }, 1000);
   }
-
   roomChannel.on('broadcast', { event: 'coin_sync' }, (p) => {
     coinTimer = p.payload.timer; coins = p.payload.coins; coinOppState.score = p.payload.oppScore;
   }).on('broadcast', { event: 'coin_move' }, (p) => { coinOppState.x = p.payload.x; coinOppState.y = p.payload.y; });
 }
-
 function coinEnd() {
+  if (!coinIsActive) return;
   coinIsActive = false; clearInterval(coinTimerInterval);
   const isWin = coinMyState.score > coinOppState.score;
-  statusText.innerText = isWin ? `👑 勝利！(${coinMyState.score}枚 vs ${coinOppState.score}枚)` : `💀 敗北...(${coinMyState.score}枚 vs ${coinOppState.score}枚)`;
+  statusText.innerText = isWin ? `👑 勝利！(${coinMyState.score}枚)` : `💀 敗北...(${coinMyState.score}枚)`;
   setTimeout(() => { if (myRole === 'host') roomChannel.send({ type: 'broadcast', event: 'back_to_select' }); returnToSelect(); }, 2500);
 }
 
 
 // ==========================================
-// 🏃 鬼ごっこ / 🚘 相撲 / ⚔️ 2D大乱闘
+// 7. 🚘 3Dドタバタ相撲 (バグ修正済)
 // ==========================================
-let oniIsActive = false, oniTimeLeft = 40, oniTimerInterval = null;
-const oniMyState = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rot: 0, stamina: 100, isGrounded: true };
-const oniOppState = { x: 0, y: 0, z: 0, rot: 0 };
-let oniPlayerMesh, oniOppMesh, oniCamContainer;
-
-function startOnigokko() {
-  activeGame = 'oni'; oniIsActive = true; oniTimeLeft = 40; switchUI(true, true);
-  staminaContainer.style.display = 'block';
-  currentScene = new THREE.Scene(); currentScene.background = new THREE.Color(0x34495e);
-  oniCamContainer = new THREE.Group(); currentScene.add(oniCamContainer);
-  currentCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
-  currentCamera.position.set(0, 12, 14); currentCamera.lookAt(0, 0, 0); oniCamContainer.add(currentCamera);
-  currentScene.add(new THREE.AmbientLight(0xffffff, 0.7));
-
-  const floor = new THREE.Mesh(new THREE.BoxGeometry(60, 1, 60), new THREE.MeshStandardMaterial({ color: 0xecf0f1 })); floor.position.y = -0.5; currentScene.add(floor);
-  oniPlayerMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.6, 1.2, 4, 8), new THREE.MeshStandardMaterial({ color: myRole==='host'?0xe74c3c:0x2980b9 }));
-  oniOppMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.6, 1.2, 4, 8), new THREE.MeshStandardMaterial({ color: myRole==='host'?0x2980b9:0xe74c3c }));
-  currentScene.add(oniPlayerMesh, oniOppMesh);
-  oniMyState.x = myRole === 'host' ? -22 : 22; oniMyState.z = myRole === 'host' ? -22 : 22;
-
-  statusText.innerText = myRole==='host' ? "👹 【あなたは鬼】 捕まえろ！" : "🏃 【あなたは逃げ手】 逃げ切れ！";
-  if (myRole === 'host') {
-    oniTimerInterval = setInterval(() => {
-      oniTimeLeft--;
-      roomChannel.send({ type: 'broadcast', event: 'oni_timer', payload: { time: oniTimeLeft } });
-      if (oniTimeLeft <= 0) oniEnd('guest');
-    }, 1000);
-  }
-  roomChannel.on('broadcast', { event: 'oni_timer' }, (p) => { oniTimeLeft = p.payload.time; })
-    .on('broadcast', { event: 'sync' }, (p) => { oniOppState.x = p.payload.x; oniOppState.y = p.payload.y; oniOppState.z = p.payload.z; oniOppState.rot = p.payload.rot; })
-    .on('broadcast', { event: 'oni_caught' }, () => oniEnd('host'));
-}
-function oniEnd(winnerRole) {
-  oniIsActive = false; clearInterval(oniTimerInterval); staminaContainer.style.display = 'none';
-  statusText.innerText = (myRole === winnerRole) ? "👑 WIN!!" : "💀 LOSE...";
-  setTimeout(() => { if (myRole === 'host') roomChannel.send({ type: 'broadcast', event: 'back_to_select' }); returnToSelect(); }, 2500);
-}
-
-let sumoIsActive = false, p1Mesh, p2Mesh, sumoArena, sumoEdge, sumoRadius = 15;
+let sumoIsActive = false, p1Mesh, p2Mesh, sumoArena, sumoRadius = 15;
 const sumoMyState = { x: 0, z: 0, rot: 0, vx: 0, vz: 0 }; const sumoOppState = { x: 0, z: 0, rot: 0 };
 function startSumo() {
   activeGame = 'sumo'; sumoIsActive = true; switchUI(true, true);
@@ -448,30 +453,44 @@ function startSumo() {
   currentScene.add(new THREE.AmbientLight(0xffffff, 0.8));
   sumoArena = new THREE.Mesh(new THREE.CylinderGeometry(15, 15, 1, 64), new THREE.MeshStandardMaterial({ color: 0x34495e })); sumoArena.position.y = -0.5; currentScene.add(sumoArena);
   p1Mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2.5), new THREE.MeshStandardMaterial({ color: 0xe74c3c })); p2Mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2.5), new THREE.MeshStandardMaterial({ color: 0x3498db })); currentScene.add(p1Mesh, p2Mesh);
-  sumoMyState.x = myRole === 'host' ? 0 : 0; sumoMyState.z = myRole === 'host' ? 8 : -8;
+  
+  sumoMyState.x = 0; sumoMyState.z = myRole === 'host' ? 8 : -8;
+  sumoMyState.vx = 0; sumoMyState.vz = 0;
+
   roomChannel.on('broadcast', { event: 'sync' }, (p) => { sumoOppState.x = p.payload.x; sumoOppState.z = p.payload.z; sumoOppState.rot = p.payload.rot; })
     .on('broadcast', { event: 'hit' }, (p) => { sumoMyState.vx += p.payload.vx; sumoMyState.vz += p.payload.vz; })
     .on('broadcast', { event: 'gameover' }, (p) => sumoEnd(p.payload.loserRole));
 }
-function sumoEnd(loser) { sumoIsActive = false; statusText.innerText = myRole !== loser ? '👑 勝利！！' : '💀 落下...'; setTimeout(() => returnToSelect(), 2000); }
+function sumoEnd(loser) {
+  if (!sumoIsActive) return;
+  sumoIsActive = false; statusText.innerText = myRole !== loser ? '👑 勝利！！' : '💀 落下...'; setTimeout(() => returnToSelect(), 2000); 
+}
 
-let brIsActive = false; const brMyState = { x: 0, y: 0, vx: 0, vy: 0, dmg: 0, dir: 1, jumps: 2 }; const brOppState = { x: 0, y: 0, dmg: 0, dir: -1 };
+
+// ==========================================
+// 8. ⚔️ 2D大乱闘 (バグ修正済)
+// ==========================================
+let brIsActive = false; const brMyState = { x: 0, y: 0, vx: 0, vy: 0, dmg: 0, dir: 1, jumps: 2 }; const brOppState = { x: 500, y: 200, dmg: 0, dir: -1 };
 const brStage = [ { x: 150, y: 450, w: 500, h: 20 }, { x: 50, y: 300, w: 150, h: 10 }, { x: 600, y: 300, w: 150, h: 10 } ];
 function startBrawler() {
   activeGame = '2d'; brIsActive = true; switchUI(false, true);
-  brMyState.x = myRole === 'host' ? 300 : 500; brMyState.y = 200;
+  brMyState.x = myRole === 'host' ? 300 : 500; brMyState.y = 200; brMyState.vx = 0; brMyState.vy = 0;
   roomChannel.on('broadcast', { event: 'sync' }, (p) => { brOppState.x = p.payload.x; brOppState.y = p.payload.y; brOppState.dmg = p.payload.dmg; brOppState.dir = p.payload.dir; })
     .on('broadcast', { event: 'hit' }, (p) => { brMyState.dmg += p.payload.dmg; brMyState.vx = p.payload.vx; brMyState.vy = p.payload.vy; })
     .on('broadcast', { event: 'gameover' }, (p) => brEnd(p.payload.loserRole));
 }
-function brEnd(loser) { brIsActive = false; statusText.innerText = myRole !== loser ? '👑 GAME SET!' : '💀 場外負け...'; setTimeout(() => returnToSelect(), 2000); }
+function brEnd(loser) {
+  if (!brIsActive) return;
+  brIsActive = false; statusText.innerText = myRole !== loser ? '👑 GAME SET!' : '💀 場外負け...'; setTimeout(() => returnToSelect(), 2000); 
+}
 
 
 // ==========================================
-// 🧠 共通物理計算
+// 🧠 共通物理計算（即負け防止ガード付き）
 // ==========================================
 function updateGameLogic() {
   frameCount++;
+  if (gameGracePeriod > 0) gameGracePeriod--; // スタート直後のカウントダウン
 
   // 🏃 鬼ごっこ
   if (activeGame === 'oni' && oniIsActive) {
@@ -498,7 +517,8 @@ function updateGameLogic() {
     oniMyState.x = Math.max(-28, Math.min(28, oniMyState.x + oniMyState.vx));
     oniMyState.y = nextY; oniMyState.z = Math.max(-28, Math.min(28, oniMyState.z + oniMyState.vz));
 
-    if (myRole === 'host') {
+    // ★ 猶予期間が明けてからヒット判定
+    if (myRole === 'host' && gameGracePeriod === 0) {
       if (Math.hypot(oniMyState.x - oniOppState.x, oniMyState.z - oniOppState.z) < 1.6 && Math.abs(oniMyState.y - oniOppState.y) < 2.0) {
         roomChannel.send({ type: 'broadcast', event: 'oni_caught' }); oniEnd('host');
       }
@@ -536,11 +556,9 @@ function updateGameLogic() {
       hockeyBall.x += hockeyBall.vx; hockeyBall.y += hockeyBall.vy;
       if (hockeyBall.y < 20 || hockeyBall.y > 580) hockeyBall.vy *= -1;
 
-      // パドル衝突
       if (hockeyBall.x < 50 && Math.abs(hockeyBall.y - hockeyP1Y) < 50) hockeyBall.vx = Math.abs(hockeyBall.vx);
       if (hockeyBall.x > 750 && Math.abs(hockeyBall.y - hockeyP2Y) < 50) hockeyBall.vx = -Math.abs(hockeyBall.vx);
 
-      // ゴール判定
       if (hockeyBall.x < 0) { hockeyScore.p2++; resetHockeyBall(); }
       if (hockeyBall.x > 800) { hockeyScore.p1++; resetHockeyBall(); }
 
@@ -559,7 +577,6 @@ function updateGameLogic() {
     coinMyState.x += coinMyState.vx; coinMyState.y += coinMyState.vy;
     if (coinMyState.y > 500) { coinMyState.y = 500; coinMyState.vy = 0; }
 
-    // コイン取得
     for (let i = coins.length - 1; i >= 0; i--) {
       coins[i].y += 3;
       if (Math.hypot(coinMyState.x - coins[i].x, coinMyState.y - coins[i].y) < 30) {
@@ -569,25 +586,31 @@ function updateGameLogic() {
     if (frameCount % 2 === 0) roomChannel.send({ type: 'broadcast', event: 'coin_move', payload: { x: coinMyState.x, y: coinMyState.y } });
   }
 
-  // 🚘 相撲
+  // 🚘 相撲（猶予期間付き）
   else if (activeGame === 'sumo' && sumoIsActive) {
     const accel = keys.action ? 0.03 : 0.01;
     if (keys.left) sumoMyState.rot += 0.05; if (keys.right) sumoMyState.rot -= 0.05;
     if (keys.up) { sumoMyState.vx -= Math.sin(sumoMyState.rot)*accel; sumoMyState.vz -= Math.cos(sumoMyState.rot)*accel; }
     sumoMyState.vx *= 0.95; sumoMyState.vz *= 0.95;
     sumoMyState.x += sumoMyState.vx; sumoMyState.z += sumoMyState.vz;
-    if (Math.hypot(sumoMyState.x, sumoMyState.z) > 15.5) { roomChannel.send({ type: 'broadcast', event: 'gameover', payload: { loserRole: myRole } }); sumoEnd(myRole); }
+    
+    if (gameGracePeriod === 0 && Math.hypot(sumoMyState.x, sumoMyState.z) > 15.5) {
+      roomChannel.send({ type: 'broadcast', event: 'gameover', payload: { loserRole: myRole } }); sumoEnd(myRole);
+    }
     if (frameCount % 3 === 0) roomChannel.send({ type: 'broadcast', event: 'sync', payload: { x: sumoMyState.x, z: sumoMyState.z, rot: sumoMyState.rot } });
   }
 
-  // ⚔️ 大乱闘
+  // ⚔️ 大乱闘（猶予期間付き）
   else if (activeGame === '2d' && brIsActive) {
     brMyState.vy += 0.6;
     if (keys.left) brMyState.vx = -4; else if (keys.right) brMyState.vx = 4; else brMyState.vx *= 0.8;
     if (keys.jump && brMyState.jumps > 0 && !prevKeys.jump) { brMyState.vy = -12; brMyState.jumps--; }
     brMyState.x += brMyState.vx; brMyState.y += brMyState.vy;
     for (let s of brStage) { if (brMyState.x > s.x - 20 && brMyState.x < s.x + s.w + 20 && brMyState.y >= s.y && brMyState.y - brMyState.vy <= s.y) { brMyState.y = s.y; brMyState.vy = 0; brMyState.jumps = 2; } }
-    if (brMyState.y > 800) { roomChannel.send({ type: 'broadcast', event: 'gameover', payload: { loserRole: myRole } }); brEnd(myRole); }
+    
+    if (gameGracePeriod === 0 && brMyState.y > 800) {
+      roomChannel.send({ type: 'broadcast', event: 'gameover', payload: { loserRole: myRole } }); brEnd(myRole);
+    }
     if (frameCount % 2 === 0) roomChannel.send({ type: 'broadcast', event: 'sync', payload: { x: brMyState.x, y: brMyState.y, dmg: brMyState.dmg, dir: brMyState.dir } });
   }
 
@@ -603,7 +626,6 @@ function animate() {
   requestAnimationFrame(animate);
   if (!document.hidden) updateGameLogic();
 
-  // 🏃 鬼ごっこ
   if (activeGame === 'oni' && oniIsActive) {
     if (oniPlayerMesh) { oniPlayerMesh.position.set(oniMyState.x, oniMyState.y, oniMyState.z); oniPlayerMesh.rotation.y = oniMyState.rot; }
     if (oniOppMesh) { oniOppMesh.position.set(oniOppState.x, oniOppState.y, oniOppState.z); oniOppMesh.rotation.y = oniOppState.rot; }
@@ -611,22 +633,16 @@ function animate() {
     statusText.innerText = `⏱️ 残り: ${oniTimeLeft}秒 (${myRole==='host'?'👹 鬼':'🏃 逃げ手'})`;
     if (currentScene) renderer.render(currentScene, currentCamera);
   }
-
-  // 🧠 ハイ＆ロー
   else if (activeGame === 'hilow' && hilowIsActive) {
     ctx2D.clearRect(0, 0, canvas2D.width, canvas2D.height);
     ctx2D.fillStyle = '#2c3e50'; ctx2D.fillRect(0, 0, canvas2D.width, canvas2D.height);
-
     ctx2D.fillStyle = 'white'; ctx2D.font = 'bold 28px Arial'; ctx2D.textAlign = 'center';
     ctx2D.fillText(`スコア: あなた ${hilowScore.me} - ${hilowScore.opp} 相手`, 400, 80);
-
     ctx2D.fillStyle = '#e74c3c'; ctx2D.fillRect(200, 350, 150, 100);
     ctx2D.fillStyle = '#3498db'; ctx2D.fillRect(450, 350, 150, 100);
     ctx2D.fillStyle = 'white'; ctx2D.font = 'bold 32px Arial';
     ctx2D.fillText('HIGH', 275, 410); ctx2D.fillText('LOW', 525, 410);
   }
-
-  // 💥 爆弾
   else if (activeGame === 'bomb' && bombIsActive) {
     if (bPlayerMesh) bPlayerMesh.position.set(bombMyState.x, 1, bombMyState.z);
     if (bOppMesh) bOppMesh.position.set(bombOppState.x, 1, bombOppState.z);
@@ -635,36 +651,24 @@ function animate() {
     statusText.innerText = `💣 爆発まで: ${bombTimer}秒 (${bombHolder===myRole?'⚠️ あなたが爆弾持ち！':'相手が爆弾持ち'})`;
     if (currentScene) renderer.render(currentScene, currentCamera);
   }
-
-  // ⚽ ホッケー
   else if (activeGame === 'hockey' && hockeyIsActive) {
     ctx2D.clearRect(0, 0, canvas2D.width, canvas2D.height);
     ctx2D.fillStyle = '#1e272e'; ctx2D.fillRect(0, 0, canvas2D.width, canvas2D.height);
-
     ctx2D.fillStyle = 'white'; ctx2D.font = 'bold 28px Arial'; ctx2D.textAlign = 'center';
     ctx2D.fillText(`${hockeyScore.p1} - ${hockeyScore.p2}`, 400, 50);
-
     ctx2D.fillStyle = '#e74c3c'; ctx2D.fillRect(20, hockeyP1Y - 40, 15, 80);
     ctx2D.fillStyle = '#3498db'; ctx2D.fillRect(765, hockeyP2Y - 40, 15, 80);
-
     ctx2D.fillStyle = '#f1c40f'; ctx2D.beginPath(); ctx2D.arc(hockeyBall.x, hockeyBall.y, 12, 0, Math.PI*2); ctx2D.fill();
   }
-
-  // 🪙 コイン
   else if (activeGame === 'coin' && coinIsActive) {
     ctx2D.clearRect(0, 0, canvas2D.width, canvas2D.height);
     ctx2D.fillStyle = '#34495e'; ctx2D.fillRect(0, 0, canvas2D.width, canvas2D.height);
-
     ctx2D.fillStyle = '#e74c3c'; ctx2D.fillRect(coinMyState.x - 15, coinMyState.y - 30, 30, 30);
     ctx2D.fillStyle = '#3498db'; ctx2D.fillRect(coinOppState.x - 15, coinOppState.y - 30, 30, 30);
-
     ctx2D.fillStyle = '#f1c40f';
     coins.forEach(c => { ctx2D.beginPath(); ctx2D.arc(c.x, c.y, 10, 0, Math.PI*2); ctx2D.fill(); });
-
     statusText.innerText = `⏱️ 残り: ${coinTimer}秒 | あなた: ${coinMyState.score}枚 | 相手: ${coinOppState.score}枚`;
   }
-
-  // 🚘 相撲
   else if (activeGame === 'sumo' && sumoIsActive) {
     if (p1Mesh && p2Mesh) {
       p1Mesh.position.set(myRole==='host'?sumoMyState.x:sumoOppState.x, 1, myRole==='host'?sumoMyState.z:sumoOppState.z);
@@ -672,8 +676,6 @@ function animate() {
     }
     if (currentScene) renderer.render(currentScene, currentCamera);
   }
-
-  // ⚔️ 大乱闘
   else if (activeGame === '2d' && brIsActive) {
     ctx2D.clearRect(0, 0, canvas2D.width, canvas2D.height); ctx2D.fillStyle = '#7f8c8d'; for(let s of brStage) ctx2D.fillRect(s.x, s.y, s.w, s.h);
     ctx2D.fillStyle = '#e74c3c'; ctx2D.fillRect(brMyState.x - 15, brMyState.y - 30, 30, 30);
