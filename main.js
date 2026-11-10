@@ -2,8 +2,7 @@ import * as THREE from 'https://esm.sh/three';
 import { OrbitControls } from 'https://esm.sh/three/addons/controls/OrbitControls.js';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js';
 
-// --- 1. Supabase の設定 ---
-// ⚠️ ここに自分のURLとキーを直接書きます
+// --- 1. Supabase の設定（URLとKey入力済み） ---
 const supabaseUrl = 'https://pxcimtveipluoenjiebx.supabase.co';
 const supabaseKey = 'sb_publishable_73t9gf0Rm47Kae9KAHfe6w_asA7g7mM';
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -12,6 +11,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 let myColor = null;
 let currentTurn = 'red';
 let isGameActive = false;
+let isOpponentJoined = false; // 相手が参加したかどうかを管理する新しい変数
 let roomChannel = null;
 const board = Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => []));
 
@@ -65,15 +65,13 @@ function updateRoomList(state) {
 function startGame(roomId, color) {
   myColor = color;
   uiContainer.style.display = 'none';
-  chatContainer.style.display = 'block'; // チャットを表示
+  chatContainer.style.display = 'block';
   isGameActive = true;
   
-  if (myColor === 'red') {
-    statusText.innerText = "相手の参加を待っています...";
-    statusText.style.color = 'white';
-  } else {
-    updateStatusText();
-  }
+  // 黄色(後手)は参加した時点で相手(赤)がいるのでtrue、赤はまだ誰もいないのでfalse
+  isOpponentJoined = (myColor === 'yellow'); 
+  
+  updateStatusText();
 
   roomChannel = supabase.channel(`game-${roomId}`);
   roomChannel
@@ -82,11 +80,11 @@ function startGame(roomId, color) {
       addPieceToBoard(x, z, c, false);
     })
     .on('broadcast', { event: 'chat' }, (payload) => {
-      // 相手からのチャットを受信
       addChatMessage('相手', payload.payload.text, payload.payload.color);
     })
     .on('broadcast', { event: 'player_joined' }, () => {
       if (myColor === 'red') {
+        isOpponentJoined = true; // 相手が参加したらフラグをON
         lobbyChannel.untrack();
         updateStatusText();
         addChatMessage('システム', '相手が参加しました！', 'white');
@@ -100,7 +98,6 @@ function startGame(roomId, color) {
     });
 }
 
-// チャット送信機能（送信ボタンかEnterキー）
 function sendChat() {
   const text = chatInput.value.trim();
   if (!text || !roomChannel) return;
@@ -117,10 +114,16 @@ function addChatMessage(sender, text, color) {
   div.style.marginBottom = '5px';
   div.innerHTML = `<span style="color: ${cCode}; font-weight: bold;">${sender}:</span> ${text}`;
   chatMessages.appendChild(div);
-  chatMessages.scrollTop = chatMessages.scrollHeight; // 一番下にスクロール
+  chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
 function updateStatusText() {
+  if (!isOpponentJoined) {
+    statusText.innerText = `相手の参加を待っています...`;
+    statusText.style.color = 'white';
+    return;
+  }
+
   if (myColor === currentTurn) {
     statusText.innerText = `あなたの番です (${myColor === 'red' ? '赤' : '黄'})`;
     statusText.style.color = myColor === 'red' ? '#ff4444' : '#ffcc00';
@@ -144,7 +147,6 @@ document.getElementById('app').appendChild(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enablePan = false;
 
-// ツヤを出すためにライトを強化
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
 scene.add(ambientLight);
 const dirLight = new THREE.DirectionalLight(0xffffff, 1);
@@ -184,17 +186,16 @@ for (let x = 0; x < 4; x++) {
   }
 }
 
-// 👑 ホバー用の「半透明の玉（ゴースト）」を作成
 const ghostGeo = new THREE.SphereGeometry(0.4, 32, 32);
 const ghostMat = new THREE.MeshStandardMaterial({
   color: 0xffffff,
   transparent: true,
-  opacity: 0.5, // 半透明
+  opacity: 0.5,
   roughness: 0.2,
   metalness: 0.3
 });
 const ghostPiece = new THREE.Mesh(ghostGeo, ghostMat);
-ghostPiece.visible = false; // 最初は隠しておく
+ghostPiece.visible = false;
 scene.add(ghostPiece);
 
 
@@ -202,9 +203,9 @@ scene.add(ghostPiece);
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
-// マウスが動いた時（ホバー処理）
 window.addEventListener('pointermove', (event) => {
-  if (!isGameActive || myColor !== currentTurn) {
+  // 相手が参加していない時はホバーを表示しない
+  if (!isGameActive || myColor !== currentTurn || !isOpponentJoined) {
     ghostPiece.visible = false;
     return;
   }
@@ -217,24 +218,24 @@ window.addEventListener('pointermove', (event) => {
     const { gridX, gridZ } = intersects[0].object.userData;
     const y = board[gridX][gridZ].length;
     
-    if (y < 4) { // まだ置ける場所なら半透明の玉を表示
+    if (y < 4) {
       const c = myColor === 'red' ? 0xff4444 : 0xffcc00;
       ghostPiece.material.color.setHex(c);
       ghostPiece.position.set(gridX - gridOffset, y + 0.4, gridZ - gridOffset);
       ghostPiece.visible = true;
     } else {
-      ghostPiece.visible = false; // 満杯なら隠す
+      ghostPiece.visible = false;
     }
   } else {
-    ghostPiece.visible = false; // 棒から外れたら隠す
+    ghostPiece.visible = false;
   }
 });
 
-// マウスをクリックした時
 window.addEventListener('click', (event) => {
-  // チャット画面をクリックした時はコマを置かないようにする
   if (event.target.closest('#chat-container')) return;
-  if (!isGameActive || myColor !== currentTurn) return;
+  
+  // 相手が参加していない時は置けないようにする
+  if (!isGameActive || myColor !== currentTurn || !isOpponentJoined) return;
 
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -254,19 +255,18 @@ function addPieceToBoard(x, z, color, isLocal) {
   const y = board[x][z].length;
   board[x][z].push(color);
 
-  // コマの生成（ツヤのある美しい玉）
   const pieceGeo = new THREE.SphereGeometry(0.4, 32, 32);
   const pieceMat = new THREE.MeshStandardMaterial({
     color: color === 'red' ? 0xff3333 : 0xffcc00,
-    roughness: 0.1, // ツヤツヤにする
-    metalness: 0.2  // 少し反射させる
+    roughness: 0.1,
+    metalness: 0.2
   });
   const piece = new THREE.Mesh(pieceGeo, pieceMat);
   piece.position.set(x - gridOffset, y + 0.4, z - gridOffset);
   scene.add(piece);
 
   if (isLocal && roomChannel) {
-    ghostPiece.visible = false; // 自分が置いたらゴーストを消す
+    ghostPiece.visible = false;
     roomChannel.send({
       type: 'broadcast',
       event: 'place_piece',
