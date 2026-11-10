@@ -3,36 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-    <title>「弧」漢字辞書・確認するならポウンド</title>
+    <title>オンライン頭脳・対戦メガポウンド (全20種)</title>
     <style>
       body { margin: 0; overflow: hidden; font-family: sans-serif; background-color: #222; color: white; touch-action: none; }
       
       #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(0,0,0,0.85); z-index: 20; }
-      .panel { background: #333; padding: 20px; border-radius: 10px; text-align: center; max-width: 500px; width: 95%; box-sizing: border-box;}
-      input, button { font-size: 0.95rem; padding: 8px; margin: 4px; border-radius: 5px; border: none; }
+      .panel { background: #333; padding: 20px; border-radius: 10px; text-align: center; max-width: 650px; width: 95%; box-sizing: border-box;}
+      input, button { font-size: 0.85rem; padding: 6px; margin: 3px; border-radius: 5px; border: none; }
       input[type="text"] { width: 80%; box-sizing: border-box; }
-      button { cursor: pointer; font-weight: bold; width: 45%; }
+      button { cursor: pointer; font-weight: bold; width: 31%; }
 
-      .btn-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
+      .btn-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; max-height: 360px; overflow-y: auto; padding: 5px; }
       
-      .btn-create { background: #e74c3c; color: white; width: 90%; }
-      .btn-game-oni { background: #e67e22; color: white; }
-      .btn-game-hilow { background: #8e44ad; color: white; }
-      .btn-game-2d { background: #2ecc71; color: white; }
-      .btn-game-sumo { background: #3498db; color: white; }
-      .btn-game-c4 { background: #f1c40f; color: black; }
-      .btn-game-bomb { background: #d35400; color: white; }
-      .btn-game-hockey { background: #16a085; color: white; }
-      .btn-game-breakout { background: #c0392b; color: white; }
-      .btn-game-coin { background: #f39c12; color: white; }
+      .btn-create { background: #e74c3c; color: white; width: 90%; font-size: 1rem; padding: 8px; }
+      
+      /* カテゴリ別カラー */
+      .btn-card { background: #8e44ad; color: white; }
+      .btn-board { background: #27ae60; color: white; }
+      .btn-pc { background: #2980b9; color: white; }
+      .btn-new { background: #d35400; color: white; }
+      .btn-action { background: #34495e; color: white; }
       
       .room-btn { background: #f39c12; color: white; display: block; margin: 8px auto; width: 90%; }
       
-      hr { margin: 15px 0; border-color: #555; }
-      #room-list-container { max-height: 100px; overflow-y: auto; background: #222; padding: 10px; border-radius: 5px;}
+      hr { margin: 10px 0; border-color: #555; }
+      #room-list-container { max-height: 80px; overflow-y: auto; background: #222; padding: 6px; border-radius: 5px;}
       
-      #status { position: absolute; top: 15px; left: 0; width: 100%; font-size: 1.4rem; font-weight: bold; z-index: 5; text-shadow: 2px 2px 4px #000; text-align: center; pointer-events: none;}
-      #controls-display { display: none; position: absolute; top: 15px; right: 15px; background: rgba(0,0,0,0.6); padding: 12px; border-radius: 8px; border: 1px solid #555; font-size: 0.85rem; z-index: 15; text-align: left; line-height: 1.4; pointer-events: none;}
+      #status { position: absolute; top: 15px; left: 0; width: 100%; font-size: 1.3rem; font-weight: bold; z-index: 5; text-shadow: 2px 2px 4px #000; text-align: center; pointer-events: none;}
+      #controls-display { display: none; position: absolute; top: 15px; right: 15px; background: rgba(0,0,0,0.65); padding: 12px; border-radius: 8px; border: 1px solid #555; font-size: 0.85rem; z-index: 15; text-align: left; line-height: 1.4; pointer-events: none;}
 
       #stamina-container { display: none; position: absolute; bottom: 100px; left: 50%; transform: translateX(-50%); width: 200px; background: rgba(0,0,0,0.5); border: 2px solid #fff; border-radius: 10px; padding: 3px; z-index: 10; }
       #stamina-bar { width: 100%; height: 15px; background: #2ecc71; border-radius: 5px; transition: width 0.1s linear; }
@@ -40,32 +38,21 @@
       #roulette-overlay { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 50; flex-direction: column; justify-content: center; align-items: center; }
       #roulette-text { font-size: 2.2rem; font-weight: bold; color: #f1c40f; margin-bottom: 20px; text-shadow: 0 0 10px #f39c12; }
 
-      /* チャット */
-      #chat-container { display: block; position: absolute; bottom: 20px; right: 20px; width: 280px; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px; z-index: 30; border: 1px solid #555; }
+      #chat-container { display: block; position: absolute; bottom: 20px; right: 20px; width: 260px; background: rgba(0,0,0,0.8); padding: 8px; border-radius: 8px; z-index: 30; border: 1px solid #555; }
       #chat-title { font-size: 0.8rem; font-weight: bold; color: #aaa; margin-bottom: 4px; text-align: left; }
-      #chat-messages { height: 110px; overflow-y: auto; margin-bottom: 6px; font-size: 0.8rem; padding-right: 5px; word-wrap: break-word; text-align: left;}
+      #chat-messages { height: 100px; overflow-y: auto; margin-bottom: 6px; font-size: 0.8rem; padding-right: 5px; word-wrap: break-word; text-align: left;}
       #chat-input-area { display: flex; }
-      #chat-input { flex: 1; padding: 5px; border-radius: 4px 0 0 4px; font-size: 0.85rem; }
-      #btn-send { width: auto; padding: 5px 10px; background: #4caf50; color: white; font-size: 0.85rem; margin: 0; border-radius: 0 4px 4px 0; }
+      #chat-input { flex: 1; padding: 4px; border-radius: 4px 0 0 4px; font-size: 0.8rem; }
+      #btn-send { width: auto; padding: 4px 8px; background: #4caf50; color: white; font-size: 0.8rem; margin: 0; border-radius: 0 4px 4px 0; }
 
-      /* スマホ操作パッド */
       #controls { display: none; position: absolute; bottom: 20px; left: 20px; z-index: 10; flex-direction: row; justify-content: space-between; box-sizing: border-box; }
       @media (pointer: coarse) { #controls { display: flex; } }
-      .d-pad { display: grid; grid-template-columns: 50px 50px 50px; grid-template-rows: 50px 50px 50px; gap: 4px; }
-      .ctrl-btn { background: rgba(255,255,255,0.3); border: 2px solid white; border-radius: 10px; color: white; font-size: 1.2rem; font-weight: bold; display: flex; justify-content: center; align-items: center; user-select: none; }
-      .ctrl-btn:active { background: rgba(255,255,255,0.7); color: black; }
+      .d-pad { display: grid; grid-template-columns: 45px 45px 45px; grid-template-rows: 45px 45px 45px; gap: 4px; }
+      .ctrl-btn { background: rgba(255,255,255,0.3); border: 2px solid white; border-radius: 8px; color: white; font-size: 1.1rem; font-weight: bold; display: flex; justify-content: center; align-items: center; user-select: none; }
       #btn-up { grid-column: 2; grid-row: 1; }
       #btn-left { grid-column: 1; grid-row: 2; }
       #btn-down { grid-column: 2; grid-row: 2; }
       #btn-right { grid-column: 3; grid-row: 2; }
-      
-      #action-pad { display: grid; grid-template-columns: 50px 50px 50px; grid-template-rows: 50px 50px 50px; gap: 4px; margin-left: 15px;}
-      .act-btn { border-radius: 50%; font-size: 0.9rem; color: white; font-weight: bold; display: flex; justify-content: center; align-items: center; user-select: none; border: 2px solid rgba(255,255,255,0.6); }
-      .act-btn:active { transform: scale(0.9); }
-      #btn-grab { grid-column: 2; grid-row: 1; background: rgba(155, 89, 182, 0.8); }
-      #btn-shield { grid-column: 1; grid-row: 2; background: rgba(52, 152, 219, 0.8); }
-      #btn-action { grid-column: 3; grid-row: 2; background: rgba(231, 76, 60, 0.8); }
-      #btn-special { grid-column: 2; grid-row: 3; background: rgba(241, 196, 15, 0.8); color: black;}
 
       #canvas-2d { display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: contain; background-color: #2c3e50; z-index: 1; }
       #app { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0; }
@@ -74,34 +61,54 @@
   <body>
     <div id="ui-container">
       <div class="panel" id="panel-lobby">
-        <h2>🎮 オンライン対戦ポウンド (全8種)</h2>
+        <h2>🎮 メガ対戦ポウンド (全20種)</h2>
         <div>
           <input type="text" id="new-room-input" placeholder="合言葉（例: room123）" />
-          <button id="btn-create-room" class="btn-create">🚪 部屋を作成して入る</button>
+          <button id="btn-create-room" class="btn-create">🚪 部屋を作成</button>
         </div>
         <hr>
         <div>
           <p>▼ 待機中の部屋一覧</p>
           <div id="room-list-container">
-            <p style="font-size: 0.9rem; color: #aaa;">待機中の部屋はありません</p>
+            <p style="font-size: 0.85rem; color: #aaa;">待機中の部屋はありません</p>
           </div>
         </div>
       </div>
 
-      <!-- セレクト画面 (8ゲーム) -->
+      <!-- 20種類のゲーム選択ボタン -->
       <div class="panel" id="panel-select" style="display: none;">
         <h2 id="room-title">🏠 部屋：---</h2>
-        <p style="color: #4caf50;" id="room-status-text">相手の接続を待っています...</p>
-        <p style="font-size: 0.85rem; color: #ccc;">遊ぶゲームを選んで投票（ランダム抽選）</p>
+        <p style="color: #4caf50;" id="room-status-text">遊ぶゲームに投票してください！</p>
         <div class="btn-grid">
-          <button id="btn-select-oni" class="btn-game-oni">🏃 モール鬼ごっこ</button>
-          <button id="btn-select-hilow" class="btn-game-hilow">🧠 ハイ＆ロー心理戦</button>
-          <button id="btn-select-bomb" class="btn-game-bomb">💥 爆弾ドッジボール</button>
-          <button id="btn-select-hockey" class="btn-game-hockey">⚽ 2Dエアホッケー</button>
-          <button id="btn-select-breakout" class="btn-game-breakout">🧱 ブロック崩し対戦</button>
-          <button id="btn-select-coin" class="btn-game-coin">🪙 コインラッシュ</button>
-          <button id="btn-select-2d" class="btn-game-2d">⚔️ 2D大乱闘バッシュ</button>
-          <button id="btn-select-sumo" class="btn-game-sumo">🚘 3Dドタバタ相撲</button>
+          <!-- カード系 -->
+          <button id="btn-select-loveletter" class="btn-card">💌 ラブレター</button>
+          <button id="btn-select-spelldraft" class="btn-card">🧙 魔導書ビルド</button>
+          <button id="btn-select-baha" class="btn-card">🐉 腹ペコバハムート</button>
+          <button id="btn-select-bl" class="btn-card">🚩 バトルライン</button>
+
+          <!-- ボード系 -->
+          <button id="btn-select-geister" class="btn-board">👻 ガイスター</button>
+          <button id="btn-select-mancala" class="btn-board">🧱 マンカラ</button>
+          <button id="btn-select-bk" class="btn-board">♟️ ブラックキング</button>
+          <button id="btn-select-pen" class="btn-board">🐧 ペンギンP</button>
+          <button id="btn-select-quoridor" class="btn-board">🧱 コリドール</button>
+
+          <!-- PC特化 -->
+          <button id="btn-select-typing" class="btn-pc">⌨️ 魔法タイピング</button>
+          <button id="btn-select-aim" class="btn-pc">🎯 エイムスナイパー</button>
+
+          <!-- 新ジャンル -->
+          <button id="btn-select-draw" class="btn-new">🎨 一筆お絵かき当て</button>
+          <button id="btn-select-rhythm" class="btn-new">🎵 リズムクラッシュ</button>
+
+          <!-- アクション/レース -->
+          <button id="btn-select-zerog" class="btn-action">🚀 宇宙無重力レース</button>
+          <button id="btn-select-defuse" class="btn-action">💣 心理爆弾解除</button>
+          <button id="btn-select-tank" class="btn-action">🎖️ 3D戦車バトル</button>
+          <button id="btn-select-hockey" class="btn-action">⚽ 2Dエアホッケー</button>
+          <button id="btn-select-oni" class="btn-action">🏃 モール鬼ごっこ</button>
+          <button id="btn-select-sumo" class="btn-action">🚘 3D相撲</button>
+          <button id="btn-select-bomb" class="btn-action">💥 爆弾ドッジ</button>
         </div>
       </div>
     </div>
@@ -133,12 +140,6 @@
         <div class="ctrl-btn" id="btn-left">◀</div>
         <div class="ctrl-btn" id="btn-down">▼</div>
         <div class="ctrl-btn" id="btn-right">▶</div>
-      </div>
-      <div id="action-pad">
-        <div class="act-btn" id="btn-grab">掴</div>
-        <div class="act-btn" id="btn-shield">防/走</div>
-        <div class="act-btn" id="btn-action">A</div>
-        <div class="act-btn" id="btn-special">B</div>
       </div>
     </div>
 
