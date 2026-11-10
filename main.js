@@ -18,7 +18,7 @@ const controlsDisplay = document.getElementById('controls-display');
 const workerScript = `
   let interval;
   self.onmessage = function(e) {
-    if (e.data === 'start') interval = setInterval(() => self.postMessage('tick'), 16); // 約60FPS
+    if (e.data === 'start') interval = setInterval(() => self.postMessage('tick'), 16);
     else if (e.data === 'stop') clearInterval(interval);
   };
 `;
@@ -40,8 +40,8 @@ function showControlsHUD(game) {
 }
 
 // --- 2. 入力処理 ---
-const keys = { up: false, down: false, left: false, right: false, action: false, jump: false, crouch: false, dive: false, guard: false, special: false };
-let prevKeys = { up: false, action: false, jump: false, dive: false, special: false };
+const keys = { up: false, down: false, left: false, right: false, action: false, jump: false, crouch: false, dive: false, guard: false, special: false, grab: false };
+let prevKeys = { up: false, action: false, jump: false, dive: false, special: false, grab: false };
 
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
@@ -51,7 +51,7 @@ window.addEventListener('keydown', (e) => {
   if(e.key === 'd' || e.key === 'ArrowRight') keys.right = true;
   if(e.code === 'Space') { e.preventDefault(); keys.action = true; keys.jump = true; }
   if(e.key === 'Shift') { keys.crouch = true; keys.guard = true; }
-  if(e.key === 'q' || e.key === 'Q') keys.dive = true;
+  if(e.key === 'q' || e.key === 'Q') { keys.dive = true; keys.grab = true; }
   if(e.key === 'e' || e.key === 'E') keys.special = true;
 });
 window.addEventListener('keyup', (e) => {
@@ -61,15 +61,27 @@ window.addEventListener('keyup', (e) => {
   if(e.key === 'd' || e.key === 'ArrowRight') keys.right = false;
   if(e.code === 'Space') { keys.action = false; keys.jump = false; }
   if(e.key === 'Shift') { keys.crouch = false; keys.guard = false; }
-  if(e.key === 'q' || e.key === 'Q') keys.dive = false;
+  if(e.key === 'q' || e.key === 'Q') { keys.dive = false; keys.grab = false; }
   if(e.key === 'e' || e.key === 'E') keys.special = false;
 });
-['up','down','left','right','action'].forEach(k => {
+window.addEventListener('blur', () => { for(let k in keys) keys[k] = false; }); // タブ移動でリセット
+
+['up','down','left','right','action','special','shield','grab'].forEach(k => {
   const btn = document.getElementById('btn-'+k);
   if(btn) {
-    btn.addEventListener('pointerdown', (e) => { e.preventDefault(); keys[k] = true; if(k==='up') keys.jump=true; if(k==='action') keys.dive=true; });
-    btn.addEventListener('pointerup', (e) => { e.preventDefault(); keys[k] = false; if(k==='up') keys.jump=false; if(k==='action') keys.dive=false; });
-    btn.addEventListener('pointerleave', (e) => { e.preventDefault(); keys[k] = false; if(k==='up') keys.jump=false; if(k==='action') keys.dive=false; });
+    btn.addEventListener('pointerdown', (e) => { 
+      e.preventDefault(); keys[k] = true; 
+      if(k==='up') keys.jump=true; 
+      if(k==='grab') keys.dive=true; 
+      if(k==='shield') { keys.guard=true; keys.crouch=true; }
+    });
+    btn.addEventListener('pointerup', (e) => { 
+      e.preventDefault(); keys[k] = false; 
+      if(k==='up') keys.jump=false; 
+      if(k==='grab') keys.dive=false;
+      if(k==='shield') { keys.guard=false; keys.crouch=false; }
+    });
+    btn.addEventListener('pointerleave', (e) => { e.preventDefault(); keys[k] = false; });
   }
 });
 function removeFocus() { document.activeElement.blur(); }
@@ -118,12 +130,12 @@ document.getElementById('app').appendChild(renderer.domElement);
 let currentScene = null, currentCamera = null;
 const canvas2D = document.getElementById('canvas-2d'); const ctx2D = canvas2D.getContext('2d');
 
-// 共通ヘルパー: UI切り替え
 function switchUI(is3D, isMobileControls) {
   uiContainer.style.display = 'none';
   document.getElementById('app').style.display = is3D ? 'block' : 'none';
   canvas2D.style.display = is3D ? 'none' : 'block';
-  document.getElementById('controls').style.display = isMobileControls ? 'flex' : 'none';
+  // CSSの@mediaと競合しないよう、強制表示ではなくクラス切替やCSSに任せる
+  document.getElementById('controls').style.display = isMobileControls ? '' : 'none';
   showControlsHUD(activeGame);
 }
 
@@ -327,7 +339,6 @@ function brEnd(loser) { brIsActive = false; const isWin = brRole !== loser; stat
 // ==========================================
 // 🔄 アニメーションループ (Worker対応版)
 // ==========================================
-let frameCount = 0;
 function animate(isBackground = false) {
   // ブラウザ表示中のみ requestAnimationFrame でループ（裏画面ではWorkerから呼ばれる）
   if (!isBackground) {
@@ -345,7 +356,6 @@ function animate(isBackground = false) {
   else if (activeGame === 'sumo' && sumoIsActive) {
     sumoRadius -= 0.003; if (sumoRadius < 3) sumoRadius = 3; const scale = sumoRadius / 15; sumoArena.scale.set(scale, 1, scale); sumoEdge.scale.set(scale, 1, scale);
     
-    // ガード状態の反映
     sumoMyState.guard = keys.guard;
     const turn = 0.05, accel = keys.action ? 0.03 : 0.01;
     
@@ -364,9 +374,9 @@ function animate(isBackground = false) {
       const overlap = 2.5 - dist; const nx = dx / dist, nz = dz / dist; sumoMyState.x += nx * overlap * 0.5; sumoMyState.z += nz * overlap * 0.5;
       const speed = Math.sqrt(sumoMyState.vx**2 + sumoMyState.vz**2);
       if (speed > 0.1) { 
-        // 相手がガードしている場合は吹っ飛びを大幅減少させる
-        let knockX = -nx * (keys.action ? 1.8 : 1.0);
-        let knockZ = -nz * (keys.action ? 1.8 : 1.0);
+        // 吹っ飛び距離の調整。ガードしている相手には効果小
+        let knockX = -nx * (keys.action ? 1.0 : 0.4);
+        let knockZ = -nz * (keys.action ? 1.0 : 0.4);
         if (sumoOppState.guard) { knockX *= 0.2; knockZ *= 0.2; }
         
         roomChannel.send({ type: 'broadcast', event: 'hit', payload: { vx: knockX, vz: knockZ } }); 
@@ -384,21 +394,20 @@ function animate(isBackground = false) {
     if (!isBackground && currentScene) renderer.render(currentScene, currentCamera);
   }
 
-  // ⚔️ 2D大乱闘 (スマブラ風)
+  // ⚔️ 2D大乱闘
   else if (activeGame === '2d' && brIsActive) {
     brMyState.vy += 0.6; // 重力
     
-    // アクションの判定とクールダウン
     if (brMyState.actTimer > 0) brMyState.actTimer--;
     else brMyState.act = 'none';
 
-    // 🛡️ シールド (ガード)
+    // 🛡️ シールド (Shift)
     if (keys.guard) {
       brMyState.act = 'guard';
-      brMyState.vx *= 0.5; // ガード中は移動が遅くなる
+      brMyState.vx *= 0.5;
     } 
     // 🟣 つかみ (Q)
-    else if (keys.dive && !prevKeys.dive && brMyState.actTimer === 0) {
+    else if (keys.grab && !prevKeys.grab && brMyState.actTimer === 0) {
       brMyState.act = 'grab'; brMyState.actTimer = 15;
     } 
     // 🌟 必殺技 (E)
@@ -407,7 +416,6 @@ function animate(isBackground = false) {
     } 
     // ⚔️ 攻撃＆スマッシュ (Space)
     else if (keys.action && !prevKeys.action && brMyState.actTimer === 0) {
-      // 移動キーが入っていたらスマッシュ攻撃
       if (keys.left || keys.right || keys.up || keys.down) brMyState.act = 'smash';
       else brMyState.act = 'attack';
       brMyState.actTimer = 15;
@@ -417,33 +425,31 @@ function animate(isBackground = false) {
     if (keys.right && brMyState.act !== 'guard') { brMyState.vx += 0.8; brMyState.dir = 1; } 
     brMyState.vx *= 0.85; 
     
-    if (keys.up && !prevKeys.up && brMyState.jumps > 0) { brMyState.vy = -12; brMyState.jumps--; }
+    if (keys.jump && !prevKeys.jump && brMyState.jumps > 0) { brMyState.vy = -12; brMyState.jumps--; }
     brMyState.x += brMyState.vx; brMyState.y += brMyState.vy;
     
-    // 床との当たり判定
     if (brMyState.vy >= 0) {
       for (let s of brStage) { if (brMyState.x > s.x - 20 && brMyState.x < s.x + s.w + 20) { if (brMyState.y - brMyState.vy <= s.y && brMyState.y >= s.y) { brMyState.y = s.y; brMyState.vy = 0; brMyState.jumps = 2; } } }
     }
 
-    // 💥 攻撃の当たり判定処理 (攻撃を打った瞬間のみ)
+    // 💥 攻撃の当たり判定
     if (brMyState.act !== 'none' && brMyState.act !== 'guard' && brMyState.actTimer === (brMyState.act === 'special' ? 24 : 14)) {
-      let hitDist = brMyState.act === 'special' ? 70 : 35; // 必殺技はリーチが長い
+      let hitDist = brMyState.act === 'special' ? 70 : 35;
       let hitRange = brMyState.act === 'special' ? 50 : 40;
       let hitX = brMyState.x + brMyState.dir * hitDist, hitY = brMyState.y - 15;
       
       if (Math.hypot(hitX - brOppState.x, hitY - (brOppState.y - 15)) < hitRange) {
         let targetDmg = brOppState.dmg;
         
-        // 相手がガードしている場合
         if (brOppState.act === 'guard' && brMyState.act !== 'grab') {
-          // ガード成功！ダメージと吹っ飛びを極小化
+          // ガード成功
           roomChannel.send({ type: 'broadcast', event: 'hit', payload: { dmg: 2, vx: brMyState.dir * 2, vy: 0 } });
         } else {
-          // ガードしていない、または「つかみ」でガードを崩した場合
+          // ヒット
           let dmg = 5, vx = 4, vy = -4;
-          if (brMyState.act === 'smash') { dmg = 20; vx = 10 + targetDmg * 0.25; vy = -8 - targetDmg * 0.15; } // スマッシュ
-          else if (brMyState.act === 'special') { dmg = 15; vx = 7 + targetDmg * 0.1; vy = -6; } // 必殺技
-          else if (brMyState.act === 'grab') { dmg = 10; vx = 3; vy = -15; } // つかみ(上に大きく投げる)
+          if (brMyState.act === 'smash') { dmg = 20; vx = 10 + targetDmg * 0.25; vy = -8 - targetDmg * 0.15; }
+          else if (brMyState.act === 'special') { dmg = 15; vx = 7 + targetDmg * 0.1; vy = -6; }
+          else if (brMyState.act === 'grab') { dmg = 10; vx = 3; vy = -15; }
 
           roomChannel.send({ type: 'broadcast', event: 'hit', payload: { dmg: dmg, vx: brMyState.dir * vx, vy: vy } });
         }
@@ -454,7 +460,6 @@ function animate(isBackground = false) {
     if (brMyState.y > 800 || brMyState.x < -200 || brMyState.x > 1000) { roomChannel.send({ type: 'broadcast', event: 'gameover', payload: { loserRole: brRole } }); brEnd(brRole); }
     if (frameCount % 2 === 0) roomChannel.send({ type: 'broadcast', event: 'sync', payload: { x: brMyState.x, y: brMyState.y, dmg: brMyState.dmg, dir: brMyState.dir, act: brMyState.act, actTimer: brMyState.actTimer } });
     
-    // --- 2D描画処理 ---
     if (!isBackground) {
       ctx2D.clearRect(0, 0, canvas2D.width, canvas2D.height); ctx2D.fillStyle = '#7f8c8d'; for(let s of brStage) ctx2D.fillRect(s.x, s.y, s.w, s.h);
       
@@ -463,16 +468,14 @@ function animate(isBackground = false) {
         ctx2D.fillStyle = isRed ? '#e74c3c' : '#3498db'; ctx2D.fillRect(-15, -30, 30, 30);
         ctx2D.fillStyle = 'white'; ctx2D.fillRect(state.dir === 1 ? 5 : -15, -25, 10, 10); 
         
-        // アクションに応じたエフェクト描画
         if (state.act === 'guard') {
-          // ガードエフェクト (半透明の青いバリア)
           ctx2D.fillStyle = 'rgba(52, 152, 219, 0.5)';
           ctx2D.beginPath(); ctx2D.arc(0, -15, 28, 0, Math.PI*2); ctx2D.fill();
         } else if (state.actTimer > 5) {
-          if (state.act === 'attack') ctx2D.fillStyle = 'rgba(241, 196, 15, 0.8)'; // 通常攻撃 (黄)
-          else if (state.act === 'smash') ctx2D.fillStyle = 'rgba(231, 76, 60, 0.9)'; // スマッシュ (赤)
-          else if (state.act === 'special') ctx2D.fillStyle = 'rgba(155, 89, 182, 0.8)'; // 必殺技 (紫)
-          else if (state.act === 'grab') ctx2D.fillStyle = 'rgba(46, 204, 113, 0.8)'; // つかみ (緑)
+          if (state.act === 'attack') ctx2D.fillStyle = 'rgba(241, 196, 15, 0.8)';
+          else if (state.act === 'smash') ctx2D.fillStyle = 'rgba(231, 76, 60, 0.9)';
+          else if (state.act === 'special') ctx2D.fillStyle = 'rgba(155, 89, 182, 0.8)';
+          else if (state.act === 'grab') ctx2D.fillStyle = 'rgba(46, 204, 113, 0.8)';
 
           let r = state.act === 'special' ? 40 : 25;
           let dx = state.act === 'special' ? 50 : 30;
@@ -489,8 +492,7 @@ function animate(isBackground = false) {
 
   // 🏃 3Dアスレチックレース
   else if (activeGame === 'race' && raceIsActive) {
-    raceMyState.vy -= 0.015; // 重力
-    
+    raceMyState.vy -= 0.015;
     raceMyState.action = 'idle';
     let speed = 0.15;
     
@@ -509,7 +511,6 @@ function animate(isBackground = false) {
     if (keys.jump && !prevKeys.jump && raceMyState.isGrounded) { raceMyState.vy = 0.35; raceMyState.isGrounded = false; }
 
     raceMyState.vx *= 0.85; raceMyState.vz *= 0.9;
-    
     let nextX = raceMyState.x + raceMyState.vx, nextY = raceMyState.y + raceMyState.vy, nextZ = raceMyState.z + raceMyState.vz;
     raceMyState.isGrounded = false;
     
@@ -524,7 +525,6 @@ function animate(isBackground = false) {
     }
 
     raceMyState.x = nextX; raceMyState.y = nextY; raceMyState.z = nextZ;
-
     if (raceMyState.y < -10) { raceMyState.x = 0; raceMyState.y = 5; raceMyState.z = 5; raceMyState.vx = 0; raceMyState.vy = 0; raceMyState.vz = 0; }
     if (raceMyState.z < -100) { roomChannel.send({ type: 'broadcast', event: 'goal', payload: { winner: raceRole } }); raceEnd(raceRole); }
     if (frameCount % 3 === 0) { roomChannel.send({ type: 'broadcast', event: 'sync', payload: { x: raceMyState.x, y: raceMyState.y, z: raceMyState.z, action: raceMyState.action } }); }
@@ -542,10 +542,10 @@ function animate(isBackground = false) {
     if (!isBackground && currentScene) renderer.render(currentScene, currentCamera);
   }
 
-  prevKeys.up = keys.up; prevKeys.action = keys.action; prevKeys.jump = keys.jump; prevKeys.dive = keys.dive; prevKeys.special = keys.special;
+  prevKeys.up = keys.up; prevKeys.action = keys.action; prevKeys.jump = keys.jump; prevKeys.dive = keys.dive; prevKeys.special = keys.special; prevKeys.grab = keys.grab;
 }
 
-// 最初の起動用
+// 最初の起動
 animate();
 
 window.addEventListener('resize', () => {
