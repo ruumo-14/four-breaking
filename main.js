@@ -4,7 +4,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js';
 
 // --- 1. Supabase の設定 ---
 // ⚠️ ここに自分のURLとキーを直接書きます
-const supabaseUrl = 'https://pxcimtveipluoenjiebx.supabase.co/rest/v1/';
+const supabaseUrl = 'https://pxcimtveipluoenjiebx.supabase.co';
 const supabaseKey = 'sb_publishable_73t9gf0Rm47Kae9KAHfe6w_asA7g7mM';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
