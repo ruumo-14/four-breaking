@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3D 立体四目並べ オンライン</title>
+    <style>
+      body { margin: 0; overflow: hidden; font-family: sans-serif; background-color: #222; color: white;}
+      #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(0,0,0,0.8); z-index: 10; }
+      .panel { background: #333; padding: 30px; border-radius: 10px; text-align: center; }
+      input, button { font-size: 1.2rem; padding: 10px; margin: 10px; border-radius: 5px; border: none; }
+      button { cursor: pointer; font-weight: bold; }
+      #btn-red { background: #ff4444; color: white; }
+      #btn-yellow { background: #ffcc00; color: black; }
+      #status { position: absolute; top: 20px; left: 20px; font-size: 1.5rem; font-weight: bold; z-index: 5; text-shadow: 2px 2px 4px #000; pointer-events: none;}
+    </style>
+  </head>
+  <body>
+    <div id="ui-container">
+      <div class="panel">
+        <h2>3D 立体四目並べ</h2>
+        <p>合言葉（ルーム名）を決めて友達と入力してください</p>
+        <input type="text" id="room-input" value="room1" />
+        <p>あなたの色を選んでスタート</p>
+        <button id="btn-red">先手 (赤) で参加</button>
+        <button id="btn-yellow">後手 (黄) で参加</button>
+      </div>
+    </div>
+    <div id="status"></div>
+    <div id="app"></div>
+    <!-- ⬇️ ここでメインのプログラムを読み込む -->
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
