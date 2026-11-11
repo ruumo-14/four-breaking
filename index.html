@@ -9,11 +9,14 @@
       
       #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(0,0,0,0.85); z-index: 20; }
       .panel { background: #333; padding: 25px; border-radius: 10px; text-align: center; max-width: 450px; width: 90%; box-sizing: border-box; }
-      input, button { font-size: 1rem; padding: 10px; margin: 5px; border-radius: 5px; border: none; }
+      input, button { font-size: 1rem; padding: 12px; margin: 6px; border-radius: 5px; border: none; }
       input[type="text"] { width: 80%; box-sizing: border-box; }
       button { cursor: pointer; font-weight: bold; width: 90%; }
       
+      .btn-local { background: #2ecc71; color: white; }
+      .btn-online-menu { background: #3498db; color: white; }
       .btn-create { background: #e74c3c; color: white; }
+      .btn-back { background: #7f8c8d; color: white; margin-top: 15px; }
       .room-btn { background: #f39c12; color: white; display: block; margin: 8px auto; }
       
       hr { margin: 20px 0; border-color: #555; }
@@ -23,7 +26,7 @@
       #controls-display { position: absolute; top: 15px; right: 15px; background: rgba(0,0,0,0.7); padding: 12px; border-radius: 8px; border: 1px solid #555; font-size: 0.85rem; z-index: 15; text-align: left; line-height: 1.4; pointer-events: none; }
 
       /* チャット */
-      #chat-container { display: block; position: absolute; bottom: 20px; right: 20px; width: 280px; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px; z-index: 30; border: 1px solid #555; }
+      #chat-container { display: none; position: absolute; bottom: 20px; right: 20px; width: 280px; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px; z-index: 30; border: 1px solid #555; }
       #chat-title { font-size: 0.8rem; font-weight: bold; color: #aaa; margin-bottom: 4px; text-align: left; }
       #chat-messages { height: 110px; overflow-y: auto; margin-bottom: 6px; font-size: 0.8rem; padding-right: 5px; word-wrap: break-word; text-align: left; }
       #chat-input-area { display: flex; }
@@ -35,8 +38,17 @@
   </head>
   <body>
     <div id="ui-container">
-      <div class="panel" id="panel-lobby">
+      <!-- メインメニュー -->
+      <div class="panel" id="panel-mode-select">
         <h2>🔴 立体四目並べ 3D</h2>
+        <p style="color: #aaa; font-size: 0.9rem;">プレイモードを選んでください</p>
+        <button id="btn-mode-local" class="btn-local">📱 1台でプレイ（交代対戦）</button>
+        <button id="btn-mode-online" class="btn-online-menu">🌐 オンラインでプレイ</button>
+      </div>
+
+      <!-- オンライン部屋ロビー -->
+      <div class="panel" id="panel-lobby" style="display: none;">
+        <h2>🌐 オンラインロビー</h2>
         <div>
           <input type="text" id="new-room-input" placeholder="合言葉（例: room123）" />
           <button id="btn-create-room" class="btn-create">🚪 部屋を作成して入る</button>
@@ -48,6 +60,7 @@
             <p style="font-size: 0.9rem; color: #aaa;">待機中の部屋はありません</p>
           </div>
         </div>
+        <button id="btn-back-to-mode" class="btn-back">⬅️ モード選択に戻る</button>
       </div>
     </div>
 
