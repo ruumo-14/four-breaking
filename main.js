@@ -6,6 +6,7 @@ const supabaseUrl = 'https://pxcimtveipluoenjiebx.supabase.co';
 const supabaseKey = 'sb_publishable_73t9gf0Rm47Kae9KAHfe6w_asA7g7mM';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+let playMode = null; // 'local' or 'online'
 let currentRoomId = null;
 let myRole = null; // 'host' (red) or 'guest' (yellow)
 let myColor = null;
@@ -15,10 +16,13 @@ let roomChannel = null;
 
 let board = Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => []));
 let hitboxes = [];
+let placedPieces = [];
 
 const statusText = document.getElementById('status');
 const uiContainer = document.getElementById('ui-container');
+const panelModeSelect = document.getElementById('panel-mode-select');
 const panelLobby = document.getElementById('panel-lobby');
+const chatContainer = document.getElementById('chat-container');
 
 // --- 3D シーン初期設定 ---
 const scene = new THREE.Scene();
@@ -36,13 +40,12 @@ controls.enablePan = false;
 controls.maxDistance = 20;
 controls.minDistance = 5;
 
-// ライティング
 scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
 dirLight.position.set(10, 20, 10);
 scene.add(dirLight);
 
-// 土台とポールの作成
+// ボード・ポールの初期構築
 function setupBoard() {
   const base = new THREE.Mesh(
     new THREE.BoxGeometry(5, 0.5, 5),
@@ -57,7 +60,6 @@ function setupBoard() {
       const px = x - 1.5;
       const pz = z - 1.5;
 
-      // ポール
       const peg = new THREE.Mesh(
         new THREE.CylinderGeometry(0.05, 0.05, 4.5),
         new THREE.MeshStandardMaterial({ color: 0xaaaaaa })
@@ -65,7 +67,6 @@ function setupBoard() {
       peg.position.set(px, 2.25, pz);
       scene.add(peg);
 
-      // 当たり判定用コライダー
       const hitbox = new THREE.Mesh(
         new THREE.BoxGeometry(0.8, 5, 0.8),
         new THREE.MeshBasicMaterial({ visible: false })
@@ -79,7 +80,36 @@ function setupBoard() {
 }
 setupBoard();
 
-// --- ネットワーク & 部屋管理 ---
+// 盤面リセット
+function resetGame() {
+  board = Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => []));
+  placedPieces.forEach(p => scene.remove(p));
+  placedPieces = [];
+  currentTurn = 'red';
+}
+
+// --- UI / モード切り替え ---
+document.getElementById('btn-mode-local').onclick = () => {
+  playMode = 'local';
+  uiContainer.style.display = 'none';
+  chatContainer.style.display = 'none';
+  resetGame();
+  isGameActive = true;
+  updateStatus();
+};
+
+document.getElementById('btn-mode-online').onclick = () => {
+  panelModeSelect.style.display = 'none';
+  panelLobby.style.display = 'block';
+  chatContainer.style.display = 'block';
+};
+
+document.getElementById('btn-back-to-mode').onclick = () => {
+  panelLobby.style.display = 'none';
+  panelModeSelect.style.display = 'block';
+};
+
+// --- オンライン接続管理 ---
 const lobbyChannel = supabase.channel('lobby');
 let isLobbyReady = false;
 
@@ -115,11 +145,13 @@ document.getElementById('btn-create-room').onclick = async () => {
 };
 
 function joinRoom(roomId, role) {
+  playMode = 'online';
   currentRoomId = roomId;
   myRole = role;
   myColor = role === 'host' ? 'red' : 'yellow';
   
   uiContainer.style.display = 'none';
+  resetGame();
 
   roomChannel = supabase.channel(`room-${roomId}`);
   roomChannel
@@ -165,12 +197,15 @@ document.getElementById('btn-send').onclick = () => {
   document.getElementById('chat-input').value = '';
 };
 
-// --- 四目並べゲームロジック ---
+// --- コマの配置＆クリック処理 ---
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
 window.addEventListener('click', (e) => {
-  if (e.target.closest('#chat-container') || e.target.closest('#ui-container') || !isGameActive || myColor !== currentTurn) return;
+  if (e.target.closest('#chat-container') || e.target.closest('#ui-container') || !isGameActive) return;
+
+  // オンラインモード時は自分のターンのみ入力許可
+  if (playMode === 'online' && myColor !== currentTurn) return;
 
   mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
@@ -180,7 +215,7 @@ window.addEventListener('click', (e) => {
   if (intersects.length > 0) {
     const { gridX, gridZ } = intersects[0].object.userData;
     if (board[gridX][gridZ].length < 4) {
-      addPiece(gridX, gridZ, myColor, true);
+      addPiece(gridX, gridZ, currentTurn, true);
     }
   }
 });
@@ -195,15 +230,23 @@ function addPiece(x, z, color, isLocal) {
   );
   piece.position.set(x - 1.5, y + 0.4, z - 1.5);
   scene.add(piece);
+  placedPieces.push(piece);
 
-  if (isLocal) {
+  if (playMode === 'online' && isLocal) {
     roomChannel.send({ type: 'broadcast', event: 'place', payload: { x, z, c: color } });
   }
 
   if (checkWin(x, y, z, color)) {
     isGameActive = false;
-    statusText.innerText = color === myColor ? "👑 あなたの勝利！" : "💀 相手の勝利...";
-    statusText.style.color = color === myColor ? "#2ecc71" : "#e74c3c";
+    if (playMode === 'local') {
+      const winnerName = color === 'red' ? '🔴 赤' : '🟡 黄';
+      statusText.innerText = `👑 ${winnerName} の勝利！`;
+      statusText.style.color = color === 'red' ? '#ff3333' : '#ffcc00';
+    } else {
+      const isWin = color === myColor;
+      statusText.innerText = isWin ? "👑 あなたの勝利！" : "💀 相手の勝利...";
+      statusText.style.color = isWin ? "#2ecc71" : "#e74c3c";
+    }
     return;
   }
 
@@ -212,12 +255,18 @@ function addPiece(x, z, color, isLocal) {
 }
 
 function updateStatus() {
-  const isMyTurn = myColor === currentTurn;
-  statusText.innerText = isMyTurn ? `【あなたの番】 (${myColor === 'red' ? '赤' : '黄'})` : `【相手の番...】 (${currentTurn === 'red' ? '赤' : '黄'})`;
-  statusText.style.color = isMyTurn ? '#ffcc00' : '#ffffff';
+  if (playMode === 'local') {
+    const turnText = currentTurn === 'red' ? '🔴 赤の番です' : '🟡 黄の番です';
+    statusText.innerText = `【1台で対戦】 ${turnText}`;
+    statusText.style.color = currentTurn === 'red' ? '#ffaa99' : '#ffee99';
+  } else {
+    const isMyTurn = myColor === currentTurn;
+    statusText.innerText = isMyTurn ? `【あなたの番】 (${myColor === 'red' ? '赤' : '黄'})` : `【相手の番...】 (${currentTurn === 'red' ? '赤' : '黄'})`;
+    statusText.style.color = isMyTurn ? '#ffcc00' : '#ffffff';
+  }
 }
 
-// 勝利判定（縦・横・高さ・斜め全方位）
+// 4連勝利判定（3D空間対応）
 function checkWin(x, y, z, color) {
   const directions = [
     [1, 0, 0], [0, 1, 0], [0, 0, 1],
@@ -245,7 +294,7 @@ function getPiece(x, y, z) {
   return board[x][z][y] || null;
 }
 
-// レンダリングループ
+// ループ
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
